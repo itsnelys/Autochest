@@ -1,127 +1,160 @@
-# Space Engineers Autochest System - Script Documentation
+# Space Engineers Autochest System
 
-This *Space Engineers* programmable block script implements an **automatic inventory collection system** that scans connected inventories, routes items into dedicated storage containers, and protects production or utility blocks that should not be emptied.
+## FR
 
----
+Script de Programmable Block pour *Space Engineers* qui collecte automatiquement les objets des inventaires connectes et les range dans des conteneurs specialises.
 
-## Table of Contents
+Le script protege les blocs de production et les blocs utilitaires qui ne doivent pas etre vides, puis affiche un etat compact sur LCD.
 
-* [Initialization and Configuration](#initialization-and-configuration)
-* [Inventory Collection Logic](#inventory-collection-logic)
-* [Protected Blocks and Inventories](#protected-blocks-and-inventories)
-* [LCD Display Logic](#lcd-display-logic)
-* [Troubleshooting](#troubleshooting)
+### Installation
 
----
+1. Place un `Programmable Block`.
+2. Copie `Script_Autochest.cs` dans le Programmable Block.
+3. Cree les conteneurs de stockage avec les noms requis.
+4. Ajoute un LCD optionnel nomme `LCD Collecteur`.
+5. Compile et laisse le script tourner en automatique.
 
-## Initialization and Configuration
+### Blocs et noms requis
 
-The system initializes by scanning the grid for storage containers and source inventories. Destination containers are detected by name, while the LCD is detected from a configurable display name.
-
-### **Script Constants**
-| Constant | Default Value | Description |
+| Bloc | Nom / Regle | Description |
 | --- | --- | --- |
-| `MAIN_STORAGE_NAME` | `Stockage Base` | Cargo containers for regular items. Ice and raw refinery resources are excluded from this route. |
-| `ICE_STORAGE_NAME` | `Stockage Glace` | Cargo containers dedicated to ice. |
-| `RAW_STORAGE_NAME` | `Stockage Brute` | Cargo containers dedicated to raw refinery resources such as ores. |
-| `LCD_NAME` | `LCD Collecteur` | LCD panel or display-capable block used for the status screen. |
-| `LCD_SURFACE_INDEX` | `0` | Screen surface used when the named block has multiple displays. |
-| `MAX_LCD_EVENTS` | `12` | Maximum number of recent transfer events shown on the LCD. |
+| Conteneur cargo | Contient `Stockage Base` | Stockage principal pour les objets standards. |
+| Conteneur cargo | Contient `Stockage Glace` | Stockage dedie a la glace. |
+| Conteneur cargo | Contient `Stockage Brute` | Stockage dedie aux minerais et ressources brutes. |
+| LCD ou ecran | Contient `LCD Collecteur` | Affichage optionnel de l'etat du collecteur. |
+| Programmable Block | N'importe quel nom | Execute le script. |
 
-### **Required Blocks**
-| Block | Required Name / Rule | Description |
+Plusieurs conteneurs par type sont supportes. Exemples : `Stockage Base 1`, `Stockage Glace Nord`, `Stockage Brute Minerais`.
+
+### Reglages
+
+| Reglage | Valeur par defaut | Description |
 | --- | --- | --- |
-| Cargo Container | Contains `Stockage Base` | Destination storage for regular items. Multiple containers are supported. |
-| Cargo Container | Contains `Stockage Glace` | Destination storage for ice only. |
-| Cargo Container | Contains `Stockage Brute` | Destination storage for raw refinery resources only. |
-| LCD Panel or Screen Block | Contains `LCD Collecteur` | Optional status display. Can be a normal LCD or a cockpit/control-seat screen. |
-| Programmable Block | Any name | Runs the script automatically every `Update100`. |
+| `MAIN_STORAGE_NAME` | `Stockage Base` | Destination des objets standards. |
+| `ICE_STORAGE_NAME` | `Stockage Glace` | Destination de la glace. |
+| `RAW_STORAGE_NAME` | `Stockage Brute` | Destination des ressources brutes. |
+| `LCD_NAME` | `LCD Collecteur` | Nom cherche pour l'ecran de statut. |
+| `LCD_SURFACE_INDEX` | `0` | Surface utilisee sur les blocs multi-ecrans. |
+| `MAX_LCD_EVENTS` | `12` | Nombre maximum d'evenements affiches. |
 
-* **Storage naming:** Examples: `Stockage Base 1`, `Stockage Base Minerais`, `Large Cargo Stockage Base`.
-* **Ice storage:** Ice is routed only to containers containing `Stockage Glace`.
-* **Raw storage:** Ore and other raw refinery resources are routed only to containers containing `Stockage Brute`.
-* **LCD naming:** The script first checks for the exact name `LCD Collecteur`, then falls back to any block name containing `LCD Collecteur`.
-* **Multi-screen blocks:** If the wrong screen is used, change `LCD_SURFACE_INDEX` to `1`, `2`, or another valid surface number.
+### Logique de tri
+
+| Type d'objet | Destination |
+| --- | --- |
+| Glace | `Stockage Glace` |
+| Minerais / ressources brutes | `Stockage Brute` |
+| Composants, lingots, outils, bouteilles, munitions et autres objets | `Stockage Base` |
+
+La glace et les ressources brutes ne retombent pas dans `Stockage Base` si leur stockage dedie est plein.
+
+### Inventaires proteges
+
+Le script ignore :
+
+- les conteneurs de destination ;
+- les Programmable Blocks ;
+- les generateurs O2/H2 ;
+- les systemes d'irrigation ;
+- les armes et tourelles ;
+- les entrees des raffineries, fonderies et assembleuses.
+
+Les sorties des raffineries, fonderies et assembleuses peuvent etre collectees normalement.
+
+### Depannage
+
+| Probleme | Solution |
+| --- | --- |
+| Aucun stockage trouve | Renomme au moins un conteneur avec `Stockage Base`, `Stockage Glace` ou `Stockage Brute`. |
+| La glace ne bouge pas | Ajoute ou libere un conteneur `Stockage Glace`. |
+| Les minerais ne bougent pas | Ajoute ou libere un conteneur `Stockage Brute`. |
+| Le LCD ne s'affiche pas | Renomme l'ecran avec `LCD Collecteur`. |
+| Le mauvais ecran est utilise | Change `LCD_SURFACE_INDEX`. |
+
+### Note de patch 0.1
+
+- Premiere version stable documentee.
+- Tri automatique entre stockage principal, glace et ressources brutes.
+- Protection des inventaires critiques de production et de combat.
+- Affichage LCD des transferts, blocages et derniers evenements.
 
 ---
 
-## Inventory Collection Logic
+## EN
 
-The script collects movable items from connected inventory blocks and sends them into the configured storage route.
+*Space Engineers* Programmable Block script that automatically collects items from connected inventories and routes them into dedicated storage containers.
 
-### **Operating Logic**
-1.  **Scan storage:** Finds all cargo containers whose name contains `Stockage Base`, `Stockage Glace`, or `Stockage Brute`.
-2.  **Scan sources:** Finds connected blocks with inventories, excluding protected blocks.
-3.  **Route:** Selects the correct destination type for each item.
-4.  **Transfer:** Moves items from source inventories into the first available container for that route.
-5.  **Report:** Writes a structured status report to the LCD and programmable block output.
+The script protects production and utility blocks that should keep their contents, then displays a compact status report on an LCD.
 
-If a destination container is full or cannot accept an item, the script tries the next configured container in the same route. If all transfers fail, the item is counted as an error. Ice and raw resources never fall back into `Stockage Base`.
+### Installation
 
-### **Storage Routes**
+1. Place a `Programmable Block`.
+2. Copy `Script_Autochest.cs` into the Programmable Block.
+3. Create the required named storage containers.
+4. Optionally add an LCD named `LCD Collecteur`.
+5. Compile and let the script run automatically.
+
+### Required Blocks and Names
+
+| Block | Name / Rule | Description |
+| --- | --- | --- |
+| Cargo container | Contains `Stockage Base` | Main storage for regular items. |
+| Cargo container | Contains `Stockage Glace` | Dedicated ice storage. |
+| Cargo container | Contains `Stockage Brute` | Dedicated raw resource and ore storage. |
+| LCD or screen | Contains `LCD Collecteur` | Optional collector status display. |
+| Programmable Block | Any name | Runs the script. |
+
+Multiple containers per storage type are supported. Examples: `Stockage Base 1`, `Stockage Glace Nord`, `Stockage Brute Minerais`.
+
+### Settings
+
+| Setting | Default Value | Description |
+| --- | --- | --- |
+| `MAIN_STORAGE_NAME` | `Stockage Base` | Destination for regular items. |
+| `ICE_STORAGE_NAME` | `Stockage Glace` | Destination for ice. |
+| `RAW_STORAGE_NAME` | `Stockage Brute` | Destination for raw resources. |
+| `LCD_NAME` | `LCD Collecteur` | Name searched for the status display. |
+| `LCD_SURFACE_INDEX` | `0` | Surface used on multi-screen blocks. |
+| `MAX_LCD_EVENTS` | `12` | Maximum number of displayed events. |
+
+### Routing Logic
+
 | Item Type | Destination |
 | --- | --- |
 | Ice | `Stockage Glace` |
 | Ores / raw refinery resources | `Stockage Brute` |
-| Components, ingots, tools, bottles, ammunition, and other regular items | `Stockage Base` |
+| Components, ingots, tools, bottles, ammunition, and other items | `Stockage Base` |
 
----
+Ice and raw resources do not fall back into `Stockage Base` if their dedicated storage is full.
 
-## Protected Blocks and Inventories
+### Protected Inventories
 
-The script deliberately ignores blocks and inventories that should keep their contents.
+The script ignores:
 
-### **Ignored Blocks**
-| Block Type / Rule | Reason |
-| --- | --- |
-| Destination storage containers | Prevents moving items out of the final storage. |
-| Programmable blocks | Avoids unnecessary inventory scans. |
-| O2/H2 generators | Keeps ice and gas production stable. |
-| Irrigation systems | Protects modded or utility inventories. |
-| Weapons and turrets | Prevents ammo from being removed. |
+- destination storage containers;
+- Programmable Blocks;
+- O2/H2 generators;
+- irrigation systems;
+- weapons and turrets;
+- input inventories of refineries, furnaces, and assemblers.
 
-### **Ignored Input Inventories**
-| Block Type | Ignored Inventory | Reason |
-| --- | --- | --- |
-| Refineries / furnaces | Input inventory `0` | Keeps ores in processing. |
-| Assemblers | Input inventory `0` | Keeps components and materials in production. |
+Output inventories from refineries, furnaces, and assemblers can still be collected normally.
 
-The output inventories of refineries, furnaces, and assemblers can still be collected normally.
-
----
-
-## LCD Display Logic
-
-The LCD interface provides a compact overview of the collector state.
-
-### **Displayed Information**
-* **State:** Shows whether the collector is ready, completed transfers, or encountered blocked transfers.
-* **Transfers:** Displays moved item count, failed transfer count, and ignored input count.
-* **Network:** Displays scanned source count and configured storage count.
-* **Routing:** Shows the active destination names for ice, raw resources, and regular items.
-* **Protection:** Reminds which production inputs are protected.
-* **Recent Actions:** Shows the latest transfer or blocked item events, limited by `MAX_LCD_EVENTS`.
-
-The script automatically configures the LCD to:
-* `TEXT_AND_IMAGE` mode
-* `Monospace` font
-* left alignment
-* compact font size for cleaner dashboards
-
----
-
-## Troubleshooting
+### Troubleshooting
 
 | Problem | Fix |
 | --- | --- |
-| No storage is found | Rename at least one cargo container so its name contains `Stockage Base`, `Stockage Glace`, or `Stockage Brute`. |
-| Ice is not moved | Add or free space in a cargo container containing `Stockage Glace`. |
-| Ore is not moved | Add or free space in a cargo container containing `Stockage Brute`. |
-| LCD is not detected | Rename the LCD or display-capable block so its name contains `LCD Collecteur`. |
-| Wrong screen is used on a cockpit/control seat | Change `LCD_SURFACE_INDEX` to another surface number. |
-| Items stay in refinery or assembler inputs | This is intentional; input inventories are protected. |
-| Ammo is not moved | This is intentional; weapons and turrets are protected. |
-| Some transfers fail | Add more storage space or check whether the item type is accepted by the destination inventory. |
+| No storage is found | Rename at least one container with `Stockage Base`, `Stockage Glace`, or `Stockage Brute`. |
+| Ice is not moved | Add or free space in a `Stockage Glace` container. |
+| Ore is not moved | Add or free space in a `Stockage Brute` container. |
+| LCD is not detected | Rename the screen with `LCD Collecteur`. |
+| Wrong screen is used | Change `LCD_SURFACE_INDEX`. |
+
+### Patch Note 0.1
+
+- First documented stable release.
+- Automatic routing between main, ice, and raw resource storage.
+- Protection for critical production and combat inventories.
+- LCD report for transfers, blocked moves, and recent events.
 
 ---
 
