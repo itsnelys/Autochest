@@ -5,23 +5,27 @@
 // ============================================================
 // Fonction :
 // - Recupere les objets des inventaires connectes
-// - Envoie les objets dans les conteneurs "Stockage Base"
+// - Envoie les objets dans les conteneurs adaptes
 // - Ignore :
 //      * O2/H2 Generator
 //      * Irrigation System
 //      * Programmable Block
 //      * Armes et tourelles
 //      * Input des raffineries, fonderies et assembleuses
-// - Supporte plusieurs conteneurs "Stockage Base"
+// - Supporte plusieurs conteneurs par type de stockage
 // - Affiche les logs sur LCD
 // ============================================================
 
-const string STORAGE_NAME = "Stockage Base";
+const string MAIN_STORAGE_NAME = "Stockage Base";
+const string ICE_STORAGE_NAME = "Stockage Glace";
+const string RAW_STORAGE_NAME = "Stockage Brute";
 const string LCD_NAME = "LCD Collecteur";
 const int LCD_SURFACE_INDEX = 0;
 const int MAX_LCD_EVENTS = 12;
 
-List<IMyTerminalBlock> storageBlocks = new List<IMyTerminalBlock>();
+List<IMyTerminalBlock> mainStorageBlocks = new List<IMyTerminalBlock>();
+List<IMyTerminalBlock> iceStorageBlocks = new List<IMyTerminalBlock>();
+List<IMyTerminalBlock> rawStorageBlocks = new List<IMyTerminalBlock>();
 List<IMyTerminalBlock> sourceBlocks = new List<IMyTerminalBlock>();
 
 IMyTextSurface lcd;
@@ -43,7 +47,9 @@ public void Main(string argument, UpdateType updateSource)
     failedTransfers = 0;
     ignoredInputs = 0;
 
-    storageBlocks.Clear();
+    mainStorageBlocks.Clear();
+    iceStorageBlocks.Clear();
+    rawStorageBlocks.Clear();
     sourceBlocks.Clear();
 
     SetupLCD();
@@ -53,7 +59,7 @@ public void Main(string argument, UpdateType updateSource)
     List<string> events = new List<string>();
     string report = "";
 
-    if (storageBlocks.Count == 0)
+    if (TotalStorageCount() == 0)
     {
         report = BuildReport("[ERREUR] Aucun stockage trouve.", events);
         WriteLCD(report);
@@ -138,8 +144,18 @@ IMyTextSurface FindLCDSurface(List<IMyTerminalBlock> blocks, bool exactName)
 void GetStorageBlocks()
 {
     GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(
-        storageBlocks,
-        block => block.CustomName.Contains(STORAGE_NAME)
+        mainStorageBlocks,
+        block => block.CustomName.Contains(MAIN_STORAGE_NAME)
+    );
+
+    GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(
+        iceStorageBlocks,
+        block => block.CustomName.Contains(ICE_STORAGE_NAME)
+    );
+
+    GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(
+        rawStorageBlocks,
+        block => block.CustomName.Contains(RAW_STORAGE_NAME)
     );
 }
 
@@ -164,7 +180,7 @@ bool ShouldIgnoreBlock(IMyTerminalBlock block)
     if (block == null)
         return true;
 
-    if (block.CustomName.Contains(STORAGE_NAME))
+    if (IsStorageBlock(block))
         return true;
 
     if (block is IMyProgrammableBlock)
@@ -177,6 +193,20 @@ bool ShouldIgnoreBlock(IMyTerminalBlock block)
         return true;
 
     if (block.BlockDefinition.SubtypeName.Contains("Irrigation"))
+        return true;
+
+    return false;
+}
+
+bool IsStorageBlock(IMyTerminalBlock block)
+{
+    if (block.CustomName.Contains(MAIN_STORAGE_NAME))
+        return true;
+
+    if (block.CustomName.Contains(ICE_STORAGE_NAME))
+        return true;
+
+    if (block.CustomName.Contains(RAW_STORAGE_NAME))
         return true;
 
     return false;
@@ -225,8 +255,9 @@ void TransferItems(IMyTerminalBlock source, List<string> events)
             var item = items[i];
 
             bool transferred = false;
+            List<IMyTerminalBlock> targetStorages = GetTargetStorages(item);
 
-            foreach (var storage in storageBlocks)
+            foreach (var storage in targetStorages)
             {
                 IMyInventory destInv = storage.GetInventory();
 
@@ -234,7 +265,7 @@ void TransferItems(IMyTerminalBlock source, List<string> events)
                 {
                     movedItems++;
 
-                    AddEvent(events, "+ " + item.Type.SubtypeId + " -> " + ShortName(storage.CustomName));
+                    AddEvent(events, "+ " + item.Type.SubtypeId + " -> " + GetRouteName(item));
 
                     transferred = true;
                     break;
@@ -245,10 +276,47 @@ void TransferItems(IMyTerminalBlock source, List<string> events)
             {
                 failedTransfers++;
 
-                AddEvent(events, "! " + item.Type.SubtypeId + " bloque");
+                AddEvent(events, "! " + item.Type.SubtypeId + " bloque -> " + GetRouteName(item));
             }
         }
     }
+}
+
+List<IMyTerminalBlock> GetTargetStorages(MyInventoryItem item)
+{
+    if (IsIce(item))
+        return iceStorageBlocks;
+
+    if (IsRawResource(item))
+        return rawStorageBlocks;
+
+    return mainStorageBlocks;
+}
+
+string GetRouteName(MyInventoryItem item)
+{
+    if (IsIce(item))
+        return ICE_STORAGE_NAME;
+
+    if (IsRawResource(item))
+        return RAW_STORAGE_NAME;
+
+    return MAIN_STORAGE_NAME;
+}
+
+bool IsIce(MyInventoryItem item)
+{
+    return item.Type.SubtypeId.ToString() == "Ice";
+}
+
+bool IsRawResource(MyInventoryItem item)
+{
+    string typeId = item.Type.TypeId.ToString();
+
+    if (IsIce(item))
+        return false;
+
+    return typeId.Contains("Ore");
 }
 
 string BuildReport(string status, List<string> events)
@@ -265,7 +333,14 @@ string BuildReport(string status, List<string> events)
 
     report += "RESEAU\n";
     report += "  Sources scannees : " + sourceBlocks.Count + "\n";
-    report += "  Stockages base   : " + storageBlocks.Count + "\n\n";
+    report += "  Stockage base    : " + mainStorageBlocks.Count + "\n";
+    report += "  Stockage glace   : " + iceStorageBlocks.Count + "\n";
+    report += "  Stockage brute   : " + rawStorageBlocks.Count + "\n\n";
+
+    report += "ROUTAGE\n";
+    report += "  Glace       -> " + ICE_STORAGE_NAME + "\n";
+    report += "  Minerais    -> " + RAW_STORAGE_NAME + "\n";
+    report += "  Autres      -> " + MAIN_STORAGE_NAME + "\n\n";
 
     report += "PROTEGE\n";
     report += "  Raffineries / fonderies : Input\n";
@@ -285,6 +360,11 @@ string BuildReport(string status, List<string> events)
     }
 
     return report;
+}
+
+int TotalStorageCount()
+{
+    return mainStorageBlocks.Count + iceStorageBlocks.Count + rawStorageBlocks.Count;
 }
 
 void AddEvent(List<string> events, string text)
