@@ -6,10 +6,12 @@
 // Fonction :
 // - Recupere les objets des inventaires connectes
 // - Envoie les objets dans les conteneurs adaptes
+// - Envoie la pierre en priorite vers les raffineries "raff de pierre"
 // - Ignore :
 //      * O2/H2 Generator
 //      * Irrigation System
 //      * Programmable Block
+//      * Reacteurs
 //      * Armes et tourelles
 //      * Input des raffineries, fonderies et assembleuses
 // - Supporte plusieurs conteneurs par type de stockage
@@ -19,6 +21,8 @@
 const string MAIN_STORAGE_NAME = "Stockage Base";
 const string ICE_STORAGE_NAME = "Stockage Glace";
 const string RAW_STORAGE_NAME = "Stockage Brute";
+const string PROCESSED_STORAGE_NAME = "Stockage Minerai";
+const string STONE_REFINERY_NAME = "raff de pierre";
 const string LCD_NAME = "LCD Collecteur";
 const int LCD_SURFACE_INDEX = 0;
 const int MAX_LCD_EVENTS = 12;
@@ -26,6 +30,8 @@ const int MAX_LCD_EVENTS = 12;
 List<IMyTerminalBlock> mainStorageBlocks = new List<IMyTerminalBlock>();
 List<IMyTerminalBlock> iceStorageBlocks = new List<IMyTerminalBlock>();
 List<IMyTerminalBlock> rawStorageBlocks = new List<IMyTerminalBlock>();
+List<IMyTerminalBlock> processedStorageBlocks = new List<IMyTerminalBlock>();
+List<IMyTerminalBlock> stoneRefineryBlocks = new List<IMyTerminalBlock>();
 List<IMyTerminalBlock> sourceBlocks = new List<IMyTerminalBlock>();
 
 IMyTextSurface lcd;
@@ -50,10 +56,13 @@ public void Main(string argument, UpdateType updateSource)
     mainStorageBlocks.Clear();
     iceStorageBlocks.Clear();
     rawStorageBlocks.Clear();
+    processedStorageBlocks.Clear();
+    stoneRefineryBlocks.Clear();
     sourceBlocks.Clear();
 
     SetupLCD();
     GetStorageBlocks();
+    GetPriorityRefineries();
     GetSourceBlocks();
 
     List<string> events = new List<string>();
@@ -157,6 +166,19 @@ void GetStorageBlocks()
         rawStorageBlocks,
         block => block.CustomName.Contains(RAW_STORAGE_NAME)
     );
+
+    GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(
+        processedStorageBlocks,
+        block => block.CustomName.Contains(PROCESSED_STORAGE_NAME)
+    );
+}
+
+void GetPriorityRefineries()
+{
+    GridTerminalSystem.GetBlocksOfType<IMyRefinery>(
+        stoneRefineryBlocks,
+        block => block.CustomName.ToLower().Contains(STONE_REFINERY_NAME)
+    );
 }
 
 void GetSourceBlocks()
@@ -189,6 +211,9 @@ bool ShouldIgnoreBlock(IMyTerminalBlock block)
     if (block is IMyGasGenerator)
         return true;
 
+    if (block is IMyReactor)
+        return true;
+
     if (IsWeaponBlock(block))
         return true;
 
@@ -207,6 +232,9 @@ bool IsStorageBlock(IMyTerminalBlock block)
         return true;
 
     if (block.CustomName.Contains(RAW_STORAGE_NAME))
+        return true;
+
+    if (block.CustomName.Contains(PROCESSED_STORAGE_NAME))
         return true;
 
     return false;
@@ -287,8 +315,14 @@ List<IMyTerminalBlock> GetTargetStorages(MyInventoryItem item)
     if (IsIce(item))
         return iceStorageBlocks;
 
+    if (IsStone(item))
+        return CombineTargets(stoneRefineryBlocks, rawStorageBlocks);
+
     if (IsRawResource(item))
         return rawStorageBlocks;
+
+    if (IsProcessedResource(item))
+        return processedStorageBlocks;
 
     return mainStorageBlocks;
 }
@@ -298,8 +332,14 @@ string GetRouteName(MyInventoryItem item)
     if (IsIce(item))
         return ICE_STORAGE_NAME;
 
+    if (IsStone(item))
+        return STONE_REFINERY_NAME + " / " + RAW_STORAGE_NAME;
+
     if (IsRawResource(item))
         return RAW_STORAGE_NAME;
+
+    if (IsProcessedResource(item))
+        return PROCESSED_STORAGE_NAME;
 
     return MAIN_STORAGE_NAME;
 }
@@ -319,6 +359,31 @@ bool IsRawResource(MyInventoryItem item)
     return typeId.Contains("Ore");
 }
 
+bool IsProcessedResource(MyInventoryItem item)
+{
+    string typeId = item.Type.TypeId.ToString();
+
+    return typeId.Contains("Ingot");
+}
+
+bool IsStone(MyInventoryItem item)
+{
+    return item.Type.SubtypeId.ToString() == "Stone";
+}
+
+List<IMyTerminalBlock> CombineTargets(List<IMyTerminalBlock> firstTargets, List<IMyTerminalBlock> fallbackTargets)
+{
+    List<IMyTerminalBlock> combinedTargets = new List<IMyTerminalBlock>();
+
+    foreach (var target in firstTargets)
+        combinedTargets.Add(target);
+
+    foreach (var target in fallbackTargets)
+        combinedTargets.Add(target);
+
+    return combinedTargets;
+}
+
 string BuildReport(string status, List<string> events)
 {
     string report = "";
@@ -335,16 +400,22 @@ string BuildReport(string status, List<string> events)
     report += "  Sources scannees : " + sourceBlocks.Count + "\n";
     report += "  Stockage base    : " + mainStorageBlocks.Count + "\n";
     report += "  Stockage glace   : " + iceStorageBlocks.Count + "\n";
-    report += "  Stockage brute   : " + rawStorageBlocks.Count + "\n\n";
+    report += "  Stockage brute   : " + rawStorageBlocks.Count + "\n";
+    report += "  Stockage minerai : " + processedStorageBlocks.Count + "\n";
+    report += "  Raff pierre      : " + stoneRefineryBlocks.Count + "\n\n";
 
     report += "ROUTAGE\n";
     report += "  Glace       -> " + ICE_STORAGE_NAME + "\n";
+    report += "  Pierre      -> " + STONE_REFINERY_NAME + " puis " + RAW_STORAGE_NAME + "\n";
     report += "  Minerais    -> " + RAW_STORAGE_NAME + "\n";
+    report += "  Traites     -> " + PROCESSED_STORAGE_NAME + "\n";
     report += "  Autres      -> " + MAIN_STORAGE_NAME + "\n\n";
 
     report += "PROTEGE\n";
     report += "  Raffineries / fonderies : Input\n";
-    report += "  Assembleuses            : Input\n\n";
+    report += "  Assembleuses            : Input\n";
+    report += "  Reacteurs               : Inventaire\n";
+    report += "  Armes / tourelles       : Inventaire\n\n";
 
     report += "DERNIERES ACTIONS\n";
     if (events.Count == 0)
@@ -364,7 +435,7 @@ string BuildReport(string status, List<string> events)
 
 int TotalStorageCount()
 {
-    return mainStorageBlocks.Count + iceStorageBlocks.Count + rawStorageBlocks.Count;
+    return mainStorageBlocks.Count + iceStorageBlocks.Count + rawStorageBlocks.Count + processedStorageBlocks.Count;
 }
 
 void AddEvent(List<string> events, string text)
